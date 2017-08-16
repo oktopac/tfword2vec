@@ -10,4 +10,8 @@ setup(
     packages=['tfword2vec'],
     test_suite='nose.collector',
     tests_require=['nose'],
+    install_requires=[
+        'numpy',
+        'tensorflow'
+      ]
     )
