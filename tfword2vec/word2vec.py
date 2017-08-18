@@ -114,6 +114,7 @@ class Word2Vec(object):
         graph = tf.Graph()
 
         # We must initialize all variables before we use them.
+        # TODO: This check doesn't work on ml-engine
         print('Initialized, training for %d steps' % num_steps)
         if self.save_path:
             if tf.train.checkpoint_exists(self.save_path):
