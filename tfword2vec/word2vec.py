@@ -153,9 +153,9 @@ class Word2Vec(object):
                     summary_str = self._session.run(summary_op, feed_dict=feed_dict)
                     self.summary_writer.add_summary(summary_str, step)
 
-                    # self.saver.save(self._session,
-                    #                 os.path.join(self.save_path, "model.ckpt"),
-                    #                 global_step=step)
+                    self.saver.save(self._session,
+                                     os.path.join(self.save_path, "model.ckpt"),
+                                     global_step=step)
 
             # Note that this is expensive (~20% slowdown if computed every 500 steps)
             if step % 100000 == 0:
