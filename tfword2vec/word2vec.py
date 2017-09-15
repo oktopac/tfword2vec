@@ -1,11 +1,11 @@
 import logging
 import numpy as np
 import tensorflow as tf
-import math
 import os
+from tfword2vec import utils
 
 class Word2Vec(object):
-    def __init__(self, session, vocabulary, save_path=None):
+    def __init__(self, session, vocabulary=None, save_path=None):
         self.save_path = save_path
         self._session = session
 
@@ -29,36 +29,43 @@ class Word2Vec(object):
 
     def forward(self):
         # Look up embeddings for inputs.
-        self.embeddings = tf.Variable(
-            tf.random_uniform([self.vocabulary_size, self.embedding_size], -1.0, 1.0))
-        embed = tf.nn.embedding_lookup(self.embeddings, self.train_input)
+        with tf.name_scope("embed"):
+            self.embedding_matrix = tf.Variable(
+                tf.random_uniform([self.vocabulary_size, self.embedding_size], -1.0, 1.0), name="embedding_matrix"
+            )
 
-        # Construct the variables for the NCE loss
-        nce_weights = tf.Variable(
-            tf.truncated_normal([self.vocabulary_size, self.embedding_size],
-                                stddev=1.0 / math.sqrt(self.embedding_size)))
-        nce_biases = tf.Variable(tf.zeros([self.vocabulary_size]))
+        with  tf.name_scope('loss'):
+            # This takes the full embedding matrix, and pulls out only the rows that are required for this example (i.e. the
+            # rows that are referenced in the train_input)
+            reduced_embed_matrix = tf.nn.embedding_lookup(self.embedding_matrix, self.train_input)
 
-        # Compute the average NCE loss for the batch.
-        # tf.nce_loss automatically draws a new sample of the negative labels each
-        # time we evaluate the loss.
-        nce_loss = tf.nn.nce_loss(weights=nce_weights,
-                                  biases=nce_biases,
-                                  labels=self.train_labels,
-                                  inputs=embed,
-                                  num_sampled=self.num_sampled,
-                                  num_classes=self.vocabulary_size)
+            # Construct the variables for the NCE loss
+            nce_weights = tf.Variable(
+                tf.truncated_normal([self.vocabulary_size, self.embedding_size],
+                                    stddev=1.0 / self.embedding_size ** 0.5))
+            nce_biases = tf.Variable(tf.zeros([self.vocabulary_size]))
 
-        self.loss = tf.reduce_mean(nce_loss)
-        tf.summary.scalar("Loss", self.loss)
+            # Compute the average NCE loss for the batch.
+            # tf.nce_loss automatically draws a new sample of the negative labels each
+            # time we evaluate the loss.
+            nce_loss = tf.nn.nce_loss(weights=nce_weights,
+                                      biases=nce_biases,
+                                      labels=self.train_labels,
+                                      inputs=reduced_embed_matrix,
+                                      num_sampled=self.num_sampled,
+                                      num_classes=self.vocabulary_size)
+        with  tf.name_scope('optimize'):
+            self.loss = tf.reduce_mean(nce_loss)
+            tf.summary.scalar("Loss", self.loss)
 
-        # Construct the SGD optimizer using a learning rate of 1.0.
-        self.optimizer = tf.train.GradientDescentOptimizer(1.0).minimize(self.loss)
+            # Construct the SGD optimizer using a learning rate of 1.0.
+            self.optimizer = tf.train.GradientDescentOptimizer(1.0).minimize(self.loss)
 
     def build_graph(self):
         # Input data.
-        self.train_input = tf.placeholder(tf.int32, shape=[self.batch_size])
-        self.train_labels = tf.placeholder(tf.int32, shape=[self.batch_size, 1])
+        with tf.name_scope("data"):
+            self.train_input = tf.placeholder(tf.int32, shape=[self.batch_size])
+            self.train_labels = tf.placeholder(tf.int32, shape=[self.batch_size, 1])
 
         self.forward()
 
@@ -71,21 +78,22 @@ class Word2Vec(object):
 
     # Build the graph component that create the simliarity matrix for all embeddings
     def similarity(self):
-        valid_dataset = tf.constant(self.valid_examples, dtype=tf.int32)
+        with  tf.name_scope('similarity'):
+            valid_dataset = tf.constant(self.valid_examples, dtype=tf.int32)
 
-        # Compute the cosine similarity between minibatch examples and all embeddings.
-        norm = tf.sqrt(tf.reduce_sum(tf.square(self.embeddings), 1, keep_dims=True))
-        self.normalized_embeddings = self.embeddings / norm
-        valid_embeddings = tf.nn.embedding_lookup(
-            self.normalized_embeddings, valid_dataset)
-        self.similarity = tf.matmul(
-            valid_embeddings, self.normalized_embeddings, transpose_b=True)
+            # Compute the cosine similarity between minibatch examples and all embeddings.
+            norm = tf.sqrt(tf.reduce_sum(tf.square(self.embedding_matrix), 1, keep_dims=True))
+            self.normalized_embeddings = self.embedding_matrix / norm
+            valid_embeddings = tf.nn.embedding_lookup(
+                self.normalized_embeddings, valid_dataset)
+            self.similarity = tf.matmul(
+                valid_embeddings, self.normalized_embeddings, transpose_b=True)
 
     # Evaluate the model, and save a checkpoint if its looking good
     def eval(self, n_batches, generate_batch):
         average_loss = 0
-        for i in xrange(n_batches):
-            batch_inputs, batch_labels = generate_batch(self.batch_size)
+        for i in range(n_batches):
+            batch_inputs, batch_labels = generate_batch()
             feed_dict = {self.train_input: batch_inputs, self.train_labels: batch_labels}
 
             # We perform one update step by evaluating the optimizer op (including it
@@ -107,7 +115,9 @@ class Word2Vec(object):
             else:
                 logging.info("Current loss (%f) worse than best (%f)" % (average_loss, self.best_loss))
 
-    def train(self, num_steps, generate_batch):
+    def train(self, num_steps, generate_single):
+        batch_generator = utils.get_batch(generate_single, self.batch_size)
+        generate_batch = lambda: next(batch_generator)
         #TODO: fix this
         self.best_loss = 2**32
 
@@ -130,8 +140,8 @@ class Word2Vec(object):
             self.summary_writer = tf.summary.FileWriter(self.save_path, self._session.graph)
 
         average_loss = 0
-        for step in xrange(num_steps):
-            batch_inputs, batch_labels = generate_batch(self.batch_size)
+        for step in range(num_steps):
+            batch_inputs, batch_labels = generate_batch()
             feed_dict = {self.train_input: batch_inputs, self.train_labels: batch_labels}
 
             # We perform one update step by evaluating the optimizer op (including it
@@ -160,12 +170,12 @@ class Word2Vec(object):
             # Note that this is expensive (~20% slowdown if computed every 500 steps)
             if step % 100000 == 0:
                 sim = self.similarity.eval()
-                for i in xrange(self.valid_size):
+                for i in range(self.valid_size):
                     valid_word = self.vocabulary[self.valid_examples[i]]
                     top_k = 8  # number of nearest neighbors
                     nearest = (-sim[i, :]).argsort()[1:top_k + 1]
                     log_str = 'Nearest to %s:' % valid_word
-                    for k in xrange(top_k):
+                    for k in range(top_k):
                         close_word = self.vocabulary[nearest[k]]
                         log_str = '%s %s,' % (log_str, close_word)
                     print(log_str)
