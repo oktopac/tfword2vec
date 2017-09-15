@@ -16,6 +16,7 @@ def generate_vocab(words, n=None):
 
 def save_vocab(vocab, path):
     with open(path, 'w') as fd:
+        fd.write("word\tcount\n")
         for word, count in vocab:
             fd.write("%s\t%d\n" % (word, count))
     fd.close()
