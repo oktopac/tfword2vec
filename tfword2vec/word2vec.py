@@ -5,9 +5,10 @@ import os
 from tfword2vec import utils
 
 class Word2Vec(object):
-    def __init__(self, session, vocabulary=None, save_path=None):
+    def __init__(self, session, vocabulary=None, save_path=None, learning_rate=1.0):
         self.save_path = save_path
         self._session = session
+        self.learning_rate = learning_rate
 
         self.vocabulary = vocabulary
         self.vocabulary_size = len(self.vocabulary)
@@ -56,10 +57,13 @@ class Word2Vec(object):
                                       num_classes=self.vocabulary_size)
         with  tf.name_scope('optimize'):
             self.loss = tf.reduce_mean(nce_loss)
-            tf.summary.scalar("Loss", self.loss)
 
-            # Construct the SGD optimizer using a learning rate of 1.0.
-            self.optimizer = tf.train.GradientDescentOptimizer(1.0).minimize(self.loss)
+            # Construct the SGD optimizer using a learning rate of self.learning_rate
+            self.global_step = tf.Variable(0, name='global_step', trainable=False)
+            self.optimizer = tf.train.MomentumOptimizer(self.learning_rate, 0.9).minimize(self.loss, global_step=self.global_step)
+
+        tf.summary.scalar("TrainLoss", self.loss)
+
 
     def build_graph(self):
         # Input data.
@@ -102,22 +106,9 @@ class Word2Vec(object):
 
         average_loss = 1.0 * average_loss / n_batches
         logging.info("Average loss on eval is %f" % average_loss)
+        return average_loss
 
-        if self.save_path is not None:
-            if average_loss < self.best_loss:
-                logging.info("Saving best model with loss %f" % average_loss)
-
-                self.saver.save(self._session,
-                                os.path.join(self.save_path, "best_model.ckpt")
-                                )
-
-                self.best_loss = average_loss
-            else:
-                logging.info("Current loss (%f) worse than best (%f)" % (average_loss, self.best_loss))
-
-    def train(self, num_steps, generate_single):
-        batch_generator = utils.get_batch(generate_single, self.batch_size)
-        generate_batch = lambda: next(batch_generator)
+    def train(self, num_epochs, generate_single):
         #TODO: fix this
         self.best_loss = 2**32
 
@@ -125,7 +116,8 @@ class Word2Vec(object):
 
         # We must initialize all variables before we use them.
         # TODO: This check doesn't work on ml-engine
-        print('Initialized, training for %d steps' % num_steps)
+        print('Initialized, training for %d epochs' % num_epochs)
+
         if self.save_path:
             if tf.train.checkpoint_exists(self.save_path):
                 logging.info("getting checkpoint")
@@ -140,42 +132,77 @@ class Word2Vec(object):
             self.summary_writer = tf.summary.FileWriter(self.save_path, self._session.graph)
 
         average_loss = 0
-        for step in range(num_steps):
-            batch_inputs, batch_labels = generate_batch()
-            feed_dict = {self.train_input: batch_inputs, self.train_labels: batch_labels}
 
-            # We perform one update step by evaluating the optimizer op (including it
-            # in the list of returned values for session.run()
-            _, loss_val = self._session.run([self.optimizer, self.loss], feed_dict=feed_dict)
-            average_loss += loss_val
+        for epoch in range(num_epochs):
+            logging.info("Running on epoch %d" % epoch)
 
-            if step % 2000 == 0:
-                if step > 0:
-                    average_loss /= 2000
-                # The average loss is an estimate of the loss over the last 2000 batches.
-                print('Average loss at step ', step, ': ', average_loss)
-                self.eval(100, generate_batch)
-                average_loss = 0
+            batch_generator = utils.get_batch(generate_single(), self.batch_size)
+            generate_batch = lambda: next(batch_generator)
 
-                if self.save_path is not None:
-                    # Also use the summary writer
-                    summary_op = tf.summary.merge_all()
-                    summary_str = self._session.run(summary_op, feed_dict=feed_dict)
-                    self.summary_writer.add_summary(summary_str, step)
+            try:
 
-                    self.saver.save(self._session,
-                                     os.path.join(self.save_path, "model.ckpt"),
-                                     global_step=step)
+                for batch_step, (batch_inputs, batch_labels) in enumerate(batch_generator):
 
-            # Note that this is expensive (~20% slowdown if computed every 500 steps)
-            if step % 100000 == 0:
-                sim = self.similarity.eval()
-                for i in range(self.valid_size):
-                    valid_word = self.vocabulary[self.valid_examples[i]]
-                    top_k = 8  # number of nearest neighbors
-                    nearest = (-sim[i, :]).argsort()[1:top_k + 1]
-                    log_str = 'Nearest to %s:' % valid_word
-                    for k in range(top_k):
-                        close_word = self.vocabulary[nearest[k]]
-                        log_str = '%s %s,' % (log_str, close_word)
-                    print(log_str)
+                    # batch_inputs, batch_labels = generate_batch()
+                    feed_dict = {self.train_input: batch_inputs, self.train_labels: batch_labels}
+
+                    # We perform one update step by evaluating the optimizer op (including it
+                    # in the list of returned values for session.run()
+                    _, loss_val = self._session.run([self.optimizer, self.loss], feed_dict=feed_dict)
+                    average_loss += loss_val
+
+                    if batch_step % 2000 == 0 and batch_step > 0:
+                        global_step = tf.train.global_step(self._session, self.global_step)
+
+                        if batch_step > 0:
+                            average_loss /= 2000
+                        # The average loss is an estimate of the loss over the last 2000 batches.
+                        print('Average loss at global_step %d epoch %d: %f' % (global_step, epoch, average_loss))
+
+                        test_loss = self.eval(100, generate_batch)
+
+                        if self.save_path is not None:
+                            if average_loss < self.best_loss:
+                                logging.info("Saving best model with loss %f" % test_loss)
+
+                                self.saver.save(self._session,
+                                                os.path.join(self.save_path, "best_model.ckpt")
+                                                )
+
+                                self.best_loss = test_loss
+                            else:
+                                logging.info("Current loss (%f) worse than best (%f)" % (test_loss, self.best_loss))
+
+                        average_loss = 0
+
+                        if self.save_path is not None:
+                            # Also use the summary writer
+                            summary_op = tf.summary.merge_all()
+                            summary_str = self._session.run(summary_op, feed_dict=feed_dict)
+                            self.summary_writer.add_summary(summary_str, global_step)
+
+                            test_loss_summary = tf.Summary(value=[
+                                tf.Summary.Value(tag="TestLoss", simple_value=test_loss),
+                            ])
+
+                            self.summary_writer.add_summary(test_loss_summary, global_step)
+
+                            self.saver.save(self._session,
+                                            os.path.join(self.save_path, "model.ckpt"),
+                                            global_step=self.global_step)
+
+                    # Note that this is expensive (~20% slowdown if computed every 500 steps)
+                    if batch_step % 100000 == 0:
+                        sim = self.similarity.eval()
+                        for i in range(self.valid_size):
+                            valid_word = self.vocabulary[self.valid_examples[i]]
+                            top_k = 8  # number of nearest neighbors
+                            nearest = (-sim[i, :]).argsort()[1:top_k + 1]
+                            log_str = 'Nearest to %s:' % valid_word
+                            for k in range(top_k):
+                                close_word = self.vocabulary[nearest[k]]
+                                log_str = '%s %s,' % (log_str, close_word)
+                            print(log_str)
+
+            except StopIteration:
+                pass
