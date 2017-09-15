@@ -17,7 +17,7 @@ def generate_vocab(words, n=None):
 def save_vocab(vocab, path):
     with open(path, 'w') as fd:
         for word, count in vocab:
-            fd.write("%s,%d\n" % (word, count))
+            fd.write("%s\t%d\n" % (word, count))
     fd.close()
 
 def generate_w2i_lookup(vocab):
