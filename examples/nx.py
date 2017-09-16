@@ -16,7 +16,6 @@ aparser.add_argument("--learning_rate", type=float, default=1.0)
 
 args = aparser.parse_args()
 
-
 G=nx.fast_gnp_random_graph(1000, 0.1)
 
 vocab = [str(i) for i in range(len(G))]
@@ -31,17 +30,27 @@ for node in G.nodes_iter(data=False):
         source.append(s)
         target.append(t)
 
-source = np.array(source)
-target = np.array(target)
+features = np.array(source)
+labels = np.array(target)
 
-def generator():
-    for s, t in zip(source, target):
-        yield s, t
+features_placeholder = tf.placeholder(features.dtype, features.shape)
+labels_placeholder = tf.placeholder(labels.dtype, labels.shape)
 
-for i in generator():
-    print(i)
-    break
+dataset = tf.contrib.data.Dataset.from_tensor_slices((features_placeholder, labels_placeholder))
 
-with tf.Graph().as_default(), tf.Session() as session:
-    w2v = word2vec.Word2Vec(session, vocab, args.output_directory, learning_rate=args.learning_rate)
-    w2v.train(args.epochs, lambda: generator())
+dataset = dataset.repeat(1)
+dataset = dataset.batch(10)
+
+iterator = dataset.make_initializable_iterator()
+with tf.Session() as session:
+    next_element = iterator.get_next()
+    session.run(iterator.initializer, feed_dict={features_placeholder: features,
+                                          labels_placeholder: labels})
+
+    value = session.run(next_element)
+    print(value)
+#
+# with tf.Graph().as_default(), tf.Session() as session:
+
+    # w2v = word2vec.Word2Vec(session, vocab, args.output_directory, learning_rate=args.learning_rate)
+    # w2v.train(args.epochs, lambda: generator())
