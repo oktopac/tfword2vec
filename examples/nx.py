@@ -33,13 +33,18 @@ for node in G.nodes_iter(data=False):
 features = np.array(source)
 labels = np.array(target)
 
-features_placeholder = tf.placeholder(features.dtype, features.shape)
-labels_placeholder = tf.placeholder(labels.dtype, labels.shape)
+def bind_dataset(features, labels):
+    features_placeholder = tf.placeholder(features.dtype, features.shape)
+    labels_placeholder = tf.placeholder(labels.dtype, labels.shape)
 
-dataset = tf.contrib.data.Dataset.from_tensor_slices((features_placeholder, labels_placeholder))
+    dataset = tf.contrib.data.Dataset.from_tensor_slices((features_placeholder, labels_placeholder))
 
-dataset = dataset.repeat(1)
-dataset = dataset.batch(10)
+    dataset = dataset.repeat(1)
+    dataset = dataset.batch(10)
+
+    return dataset
+
+dataset = bind_dataset(features, labels)
 
 iterator = dataset.make_initializable_iterator()
 with tf.Session() as session:
