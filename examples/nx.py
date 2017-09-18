@@ -47,6 +47,7 @@ with tf.Session() as session:
     session.run(iterator.initializer, feed_dict={features_placeholder: features,
                                           labels_placeholder: labels})
 
+    for i in range(10)
     value = session.run(next_element)
     print(value)
 #

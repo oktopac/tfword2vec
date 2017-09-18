@@ -65,5 +65,5 @@ def setup_document_generator(fname, outdir, vocab_size, skip_window):
     index_document = generate_index_document(w2i, words)
     del words
     # Here we create a function that starts a new single generator
-    single_generator = lambda: generate_sample(index_document, skip_window)
+    single_generator = generate_sample(index_document, skip_window)
     return single_generator, i2w

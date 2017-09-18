@@ -3,6 +3,7 @@ import argparse
 import logging
 import tensorflow as tf
 import os
+import numpy as np
 
 aparser = argparse.ArgumentParser()
 
@@ -26,7 +27,14 @@ if not os.path.exists(args.output_directory):
 generate_single, vocab = utils.setup_document_generator(args.document_file, args.output_directory,
                                                         args.vocab_size, args.context_window)
 
+features, labels = [], []
+for f, l in generate_single:
+    features.append(f)
+    labels.append(l)
+
+labels = np.array(labels, np.int64, ndmin=2).T
 
 with tf.Graph().as_default(), tf.Session() as session:
     w2v = word2vec.Word2Vec(session, vocab, args.output_directory, learning_rate=args.learning_rate)
-    w2v.train(args.epochs, generate_single)
+    w2v.add_training_data(features, labels)
+    w2v.train(args.epochs)
