@@ -159,18 +159,45 @@ class Word2Vec(object):
             average_loss = 0
             self.initialise_training_iterator()
             try:
+                i = 0
                 while True:
+                    i += 1
                     # We perform one update step by evaluating the optimizer op (including it
                     # in the list of returned values for session.run()
-                    _, loss_val = self.session.run([self.optimizer, self.loss])
-                    average_loss += loss_val
+
+
+                    if i % 1000 == 0 and self.save_path is not None:
+                        # Also use the summary writer
+                        summary_op = tf.summary.merge_all()
+                        _, loss_val, summary_str = self.session.run([self.optimizer, self.loss, summary_op])
+                        average_loss += loss_val
+
+                        global_step = tf.train.global_step(self.session, self.global_step)
+
+                        # The average loss is an estimate of the loss over the last 2000 batches.
+                        print('Average loss at global_step %d epoch %d: %f' % (
+                        global_step, epoch, average_loss / 1000.))
+
+                        self.summary_writer.add_summary(summary_str, global_step)
+
+                        # test_loss_summary = tf.Summary(value=[
+                        #     tf.Summary.Value(tag="TestLoss", simple_value=test_loss),
+                        # ])
+                        #
+                        # self.summary_writer.add_summary(test_loss_summary, global_step)
+
+                        self.saver.save(self.session,
+                                        os.path.join(self.save_path, "model.ckpt"),
+                                        global_step=self.global_step)
+
+                        average_loss = 0
+                    else:
+                        _, loss_val = self.session.run([self.optimizer, self.loss])
+                        average_loss += loss_val
+
             except tf.errors.OutOfRangeError:
                 pass
 
-            global_step = tf.train.global_step(self.session, self.global_step)
-
-            # The average loss is an estimate of the loss over the last 2000 batches.
-            print('Average loss at global_step %d epoch %d: %f' % (global_step, epoch, average_loss / global_step))
 
             # test_loss = self.eval(100, generate_batch)
 
@@ -188,21 +215,7 @@ class Word2Vec(object):
             #
             # average_loss = 0
             #
-            if self.save_path is not None:
-                # Also use the summary writer
-                # summary_op = tf.summary.merge_all()
-                # summary_str = self.session.run(summary_op)
-                # self.summary_writer.add_summary(summary_str, global_step)
 
-                # test_loss_summary = tf.Summary(value=[
-                #     tf.Summary.Value(tag="TestLoss", simple_value=test_loss),
-                # ])
-
-                # self.summary_writer.add_summary(test_loss_summary, global_step)
-
-                self.saver.save(self.session,
-                                os.path.join(self.save_path, "model.ckpt"),
-                                global_step=self.global_step)
             #
             # # Note that this is expensive (~20% slowdown if computed every 500 steps)
             # if batch_step % 100000 == 0:
