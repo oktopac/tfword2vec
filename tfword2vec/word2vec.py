@@ -11,14 +11,11 @@ class Word2Vec(object):
         self.session = session
         self.learning_rate = learning_rate
 
-        self.features_placeholder = tf.placeholder(np.int64)
-        self.labels_placeholder = tf.placeholder(np.int64)
-
         self.vocabulary = vocabulary
         self.vocabulary_size = len(self.vocabulary)
 
         logging.info("Using %d vocab size" % self.vocabulary_size)
-        self.batch_size = 256
+        self.batch_size = 512
         self.embedding_size = 128  # Dimension of the embedding vector.
 
         # We pick a random validation set to sample nearest neighbors. Here we limit the
@@ -51,21 +48,22 @@ class Word2Vec(object):
 
     def forward(self):
         # Look up embeddings for inputs.
-        with tf.name_scope("embed"):
+        with tf.name_scope("embedding"):
             self.embedding_matrix = tf.Variable(
                 tf.random_uniform([self.vocabulary_size, self.embedding_size], -1.0, 1.0), name="embedding_matrix"
             )
 
-        with  tf.name_scope('loss'):
+        with tf.name_scope('reduced_embedding'):
             # This takes the full embedding matrix, and pulls out only the rows that are required for this example (i.e. the
             # rows that are referenced in the train_input)
-            reduced_embed_matrix = tf.nn.embedding_lookup(self.embedding_matrix, self.train_input)
+            reduced_embed_matrix = tf.nn.embedding_lookup(self.embedding_matrix, self.train_input, name="reduced_embedding_matrix")
 
+        with tf.name_scope('loss'):
             # Construct the variables for the NCE loss
             nce_weights = tf.Variable(
                 tf.truncated_normal([self.vocabulary_size, self.embedding_size],
-                                    stddev=1.0 / self.embedding_size ** 0.5))
-            nce_biases = tf.Variable(tf.zeros([self.vocabulary_size]))
+                                    stddev=1.0 / self.embedding_size ** 0.5), name="nce_weights")
+            nce_biases = tf.Variable(tf.zeros([self.vocabulary_size]), name="nce_bias")
 
             # Compute the average NCE loss for the batch.
             # tf.nce_loss automatically draws a new sample of the negative labels each
@@ -75,8 +73,9 @@ class Word2Vec(object):
                                       labels=self.train_labels,
                                       inputs=reduced_embed_matrix,
                                       num_sampled=self.num_sampled,
-                                      num_classes=self.vocabulary_size)
-        with  tf.name_scope('optimize'):
+                                      num_classes=self.vocabulary_size,
+                                      name="nce_loss")
+        with tf.name_scope('optimize'):
             self.loss = tf.reduce_mean(nce_loss)
 
             # Construct the SGD optimizer using a learning rate of self.learning_rate
@@ -91,9 +90,12 @@ class Word2Vec(object):
         with tf.device('/cpu:0'):
             # Input data.
             with tf.name_scope("data"):
+                self.features_placeholder = tf.placeholder(np.int64, name="features")
+                self.labels_placeholder = tf.placeholder(np.int64, name="labels")
+
                 self.dataset = tf.contrib.data.Dataset.from_tensor_slices((self.features_placeholder, self.labels_placeholder))
 
-                self.dataset = self.dataset.batch(self.batch_size).shuffle(buffer_size=10000)
+                self.dataset = self.dataset.shuffle(buffer_size=10000).batch(self.batch_size)
 
                 self.train_iterator = self.dataset.make_initializable_iterator()
 
@@ -110,7 +112,7 @@ class Word2Vec(object):
 
     # Build the graph component that create the simliarity matrix for all embeddings
     def similarity(self):
-        with  tf.name_scope('similarity'):
+        with tf.name_scope('similarity'):
             valid_dataset = tf.constant(self.valid_examples, dtype=tf.int32)
 
             # Compute the cosine similarity between minibatch examples and all embeddings.
@@ -152,7 +154,7 @@ class Word2Vec(object):
 
         # We must initialize all variables before we use them.
         # TODO: This check doesn't work on ml-engine
-        print('Initialized, training for %d epochs' % num_epochs)
+        logging.info('Initialized, training for %d epochs' % num_epochs)
 
         if self.save_path:
             if tf.train.checkpoint_exists(self.save_path):
@@ -201,7 +203,7 @@ class Word2Vec(object):
                         global_step = tf.train.global_step(self.session, self.global_step)
 
                         # The average loss is an estimate of the loss over the last 2000 batches.
-                        print('Average loss at global_step %d epoch %d: %f' % (
+                        logging.info('Average loss at global_step %d epoch %d: %f' % (
                         global_step, epoch, average_loss / 1000.))
 
                         self.summary_writer.add_summary(summary_str, global_step)

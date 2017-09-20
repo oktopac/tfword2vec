@@ -11,7 +11,8 @@ from sklearn import model_selection
 
 aparser = argparse.ArgumentParser()
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s %(levelname)s %(message)s')
 
 aparser.add_argument("graphfile")
 aparser.add_argument("vocablist")
@@ -67,8 +68,10 @@ if not os.path.exists(args.output_directory):
 
 logging.info("Training model")
 
+config = tf.ConfigProto()
+# config.graph_options.optimizer_options.global_jit_level = tf.OptimizerOptions.ON_1
 
-with tf.Graph().as_default(), tf.Session() as session:
+with tf.Graph().as_default(), tf.Session(config=config) as session:
 
     w2v = word2vec.Word2Vec(session, vocab, args.output_directory, learning_rate=args.learning_rate)
     w2v.add_training_data(X_train, y_train)
