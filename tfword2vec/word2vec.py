@@ -88,15 +88,16 @@ class Word2Vec(object):
 
 
     def build_graph(self):
-        # Input data.
-        with tf.name_scope("data"):
-            self.dataset = tf.contrib.data.Dataset.from_tensor_slices((self.features_placeholder, self.labels_placeholder))
+        with tf.device('/cpu:0'):
+            # Input data.
+            with tf.name_scope("data"):
+                self.dataset = tf.contrib.data.Dataset.from_tensor_slices((self.features_placeholder, self.labels_placeholder))
 
-            self.dataset = self.dataset.batch(self.batch_size).shuffle(buffer_size=10000)
+                self.dataset = self.dataset.batch(self.batch_size).shuffle(buffer_size=10000)
 
-            self.train_iterator = self.dataset.make_initializable_iterator()
+                self.train_iterator = self.dataset.make_initializable_iterator()
 
-            self.train_input, self.train_labels = self.train_iterator.get_next()
+                self.train_input, self.train_labels = self.train_iterator.get_next()
 
         self.forward()
 
