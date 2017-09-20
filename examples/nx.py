@@ -73,4 +73,4 @@ with tf.Graph().as_default(), tf.Session() as session:
     w2v = word2vec.Word2Vec(session, vocab, args.output_directory, learning_rate=args.learning_rate)
     w2v.add_training_data(X_train, y_train)
     w2v.add_test_data(X_test, y_test)
-    w2v.train(args.epochs)
+    w2v.train(args.epochs, trace="trace.json")

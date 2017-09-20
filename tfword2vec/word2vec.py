@@ -2,7 +2,7 @@ import logging
 import numpy as np
 import tensorflow as tf
 import os
-from tfword2vec import utils
+from tensorflow.python.client import timeline
 
 class Word2Vec(object):
     def __init__(self, session, vocabulary=None, save_path=None, learning_rate=1.0):
@@ -143,7 +143,7 @@ class Word2Vec(object):
         logging.info("Average loss on eval is %f" % average_loss)
         return average_loss
 
-    def train(self, num_epochs):
+    def train(self, num_epochs, trace=False):
         #TODO: fix this
         self.best_loss = 2**32
 
@@ -175,6 +175,16 @@ class Word2Vec(object):
             try:
                 i = 0
                 while True:
+                    if trace and i == 100:
+                        run_metadata = tf.RunMetadata()
+                        _, loss_val = self.session.run([self.optimizer, self.loss],
+                               options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE),
+                               run_metadata=run_metadata)
+                        average_loss += loss_val
+
+                        trace = timeline.Timeline(step_stats=run_metadata.step_stats)
+                        with open("%s/trace.json" % self.save_path, 'w') as trace_file:
+                            trace_file.write(trace.generate_chrome_trace_format())
 
                     i += 1
                     # We perform one update step by evaluating the optimizer op (including it

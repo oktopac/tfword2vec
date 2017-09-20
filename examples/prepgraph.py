@@ -1,11 +1,6 @@
 import networkx as nx
-import numpy as np
-import itertools
 import argparse
-from tfword2vec import utils, word2vec
 import logging
-import tensorflow as tf
-import os
 import operator
 
 aparser = argparse.ArgumentParser()
