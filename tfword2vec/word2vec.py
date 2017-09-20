@@ -6,6 +6,7 @@ from tfword2vec import utils
 
 class Word2Vec(object):
     def __init__(self, session, vocabulary=None, save_path=None, learning_rate=1.0):
+        self._test_data = False
         self.save_path = save_path
         self.session = session
         self.learning_rate = learning_rate
@@ -30,6 +31,11 @@ class Word2Vec(object):
 
         self.build_graph()
         self.init.run()
+
+    def add_test_data(self, features, labels):
+        self._test_data = True
+        self._test_features = features
+        self._test_labels = labels
 
     def add_training_data(self, features, labels):
         self._features = features
@@ -75,8 +81,8 @@ class Word2Vec(object):
 
             # Construct the SGD optimizer using a learning rate of self.learning_rate
             self.global_step = tf.Variable(0, name='global_step', trainable=False)
-            # self.optimizer = tf.train.MomentumOptimizer(self.learning_rate, 0.9).minimize(self.loss, global_step=self.global_step)
-            self.optimizer = tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.loss, global_step=self.global_step)
+            self.optimizer = tf.train.MomentumOptimizer(self.learning_rate, 0.9).minimize(self.loss, global_step=self.global_step)
+            # self.optimizer = tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.loss, global_step=self.global_step)
 
         tf.summary.scalar("TrainLoss", self.loss)
 
@@ -115,15 +121,23 @@ class Word2Vec(object):
                 valid_embeddings, self.normalized_embeddings, transpose_b=True)
 
     # Evaluate the model, and save a checkpoint if its looking good
-    def eval(self, n_batches, generate_batch):
+    def test(self):
+        self.session.run(self.train_iterator.initializer,
+                         feed_dict={
+                            self.features_placeholder: self._test_features,
+                            self.labels_placeholder: self._test_labels
+                         })
         average_loss = 0
-        for i in range(n_batches):
-            batch_inputs, batch_labels = generate_batch()
-            feed_dict = {self.train_input: batch_inputs, self.train_labels: batch_labels}
+        n_batches = 1
 
-            # We perform one update step by evaluating the optimizer op (including it
-            # in the list of returned values for session.run()
-            average_loss += self.session.run(self.loss, feed_dict=feed_dict)
+        try:
+            while True:
+                # We perform one update step by evaluating the optimizer op (including it
+                # in the list of returned values for session.run()
+                average_loss += self.session.run(self.loss)
+                n_batches += 1
+        except tf.errors.OutOfRangeError:
+            pass
 
         average_loss = 1.0 * average_loss / n_batches
         logging.info("Average loss on eval is %f" % average_loss)
@@ -161,6 +175,7 @@ class Word2Vec(object):
             try:
                 i = 0
                 while True:
+
                     i += 1
                     # We perform one update step by evaluating the optimizer op (including it
                     # in the list of returned values for session.run()
@@ -180,12 +195,6 @@ class Word2Vec(object):
 
                         self.summary_writer.add_summary(summary_str, global_step)
 
-                        # test_loss_summary = tf.Summary(value=[
-                        #     tf.Summary.Value(tag="TestLoss", simple_value=test_loss),
-                        # ])
-                        #
-                        # self.summary_writer.add_summary(test_loss_summary, global_step)
-
                         self.saver.save(self.session,
                                         os.path.join(self.save_path, "model.ckpt"),
                                         global_step=self.global_step)
@@ -198,23 +207,29 @@ class Word2Vec(object):
             except tf.errors.OutOfRangeError:
                 pass
 
+            if self._test_data:
+                test_loss = self.test()
 
-            # test_loss = self.eval(100, generate_batch)
+                if self.save_path is not None:
+                    global_step = tf.train.global_step(self.session, self.global_step)
 
-            # if self.save_path is not None:
-            #     if average_loss < self.best_loss:
-            #         logging.info("Saving best model with loss %f" % test_loss)
-            #
-            #         self.saver.save(self.session,
-            #                         os.path.join(self.save_path, "best_model.ckpt")
-            #                         )
-            #
-            #         self.best_loss = test_loss
-            #     else:
-            #         logging.info("Current loss (%f) worse than best (%f)" % (test_loss, self.best_loss))
-            #
-            # average_loss = 0
-            #
+                    test_loss_summary = tf.Summary(value=[
+                        tf.Summary.Value(tag="TestLoss", simple_value=test_loss),
+                    ])
+
+                    self.summary_writer.add_summary(test_loss_summary, global_step)
+
+                    if average_loss < self.best_loss:
+                        logging.info("Saving best model with loss %f" % test_loss)
+
+                        self.saver.save(self.session,
+                                        os.path.join(self.save_path, "best_model.ckpt")
+                                        )
+
+                        self.best_loss = test_loss
+
+                    else:
+                        logging.info("Current loss (%f) worse than best (%f)" % (test_loss, self.best_loss))
 
             #
             # # Note that this is expensive (~20% slowdown if computed every 500 steps)
